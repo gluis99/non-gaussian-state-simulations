@@ -16,3 +16,9 @@ jupyter lab
 ```
 
 Open `cat_state_gen.ipynb` and run all cells.
+
+## Optional: LaTeX rendering
+
+Some plots use LaTeX text rendering in matplotlib.
+
+If labels do not render correctly, install a LaTeX distribution
