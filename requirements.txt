@@ -1,0 +1,14 @@
+# Core numerical + plotting stack
+numpy>=1.24
+matplotlib>=3.7
+
+# Notebook runtime
+jupyterlab>=4.0
+ipykernel>=6.0
+ipywidgets>=8.0
+
+# Optional plotting dependency already used in project metadata
+plotly>=5.24
+
+# Quantum optics simulator used by the notebook
+git+https://github.com/XanaduAI/MrMustard.git
