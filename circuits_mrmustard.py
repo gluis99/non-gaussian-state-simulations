@@ -201,7 +201,7 @@ def circuit_4cat_v2(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=Fal
 # Gaussian boson sampling like circuit for generating grid-like states
 # Like in M. V. Larsen et al. (2025). https://doi.org/10.1038/s41586-025-09044-5
 
-# Generates output state for the 3 input modes circuit
+# Generates output state for the 3 input modes cascade circuit
 def circuit_3mode_GBS(
     Ns, 
     r0, r1=None, r2=None,
@@ -263,7 +263,7 @@ def circuit_3mode_GBS(
 
     return out.normalize(), probability
 
-# Generalization to N modes (breaks down )
+# Generalization to N modes cascade circuit with N-1 beam splitters
 def circuit_Nmode_GBS(
     Ns,
     squeezing_params=None,
