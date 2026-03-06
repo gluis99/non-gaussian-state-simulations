@@ -589,6 +589,9 @@ class GKPState:
         return fit
     
     ##################################################################################
+    # Pipeline for squeezed, scaled-grid comparison analysis using xi(r, s)
+
+    ##################################################################################
     # Lattice points of the GKP state
     def _lattice_points_in_window(
         self,
