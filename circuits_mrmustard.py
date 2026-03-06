@@ -9,6 +9,13 @@ from mrmustard.physics.wigner import wigner_discretized
 
 r = lambda r_dB: r_dB / 20 * np.log(10)
 
+# Circuits for generating grid-like states using the MRMustard library.
+
+
+#################################################################################################
+# Cat state generation circuit
+# Following J. Hastrup et al. (2020). https://doi.org/10.1364/OL.383194
+
 # Two options are supported:
  # 1) Provide only r0 -> r1=-r0 is used
  # 2) Provide all two squeezing parameters explicitly
@@ -46,7 +53,6 @@ def circuit_2cat(r0, r1 = None, n = 1, cutoff = None, r_in_dB = False):
 
     return out.normalize(), probability
 
-##################################################################################################
 
 def circuit_4cat(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=False):
     if not isinstance(Ns, (list, tuple)) or len(Ns) != 2:
@@ -190,6 +196,150 @@ def circuit_4cat_v2(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=Fal
     out_norm = out.normalize()
 
     return out_norm, out.probability
+
+##################################################################################################
+# Gaussian boson sampling like circuit for generating grid-like states
+# Like in M. V. Larsen et al. (2025). https://doi.org/10.1038/s41586-025-09044-5
+
+# Generates output state for the 3 input modes circuit
+def circuit_3mode_GBS(
+    Ns, 
+    r0, r1=None, r2=None,
+    theta1=None, phi1=None,
+    theta2=None, phi2=None,
+    cutoff=None,
+    r_in_dB=False,
+):
+
+    if not isinstance(Ns, (list, tuple)) or len(Ns) != 2:
+        raise ValueError("Ns must be a list/tuple with exactly two elements: [n0, n1]")
+    if not all(isinstance(n, (int, np.integer)) and n >= 0 for n in Ns):
+        raise ValueError("Ns entries must be non-negative integers")
+
+    if cutoff is not None and (not isinstance(cutoff, (int, np.integer)) or cutoff <= 0):
+        raise ValueError("cutoff must be a positive integer")
+
+    if any(v is None for v in (theta1, phi1, theta2, phi2)):
+        raise ValueError("theta1, phi1, theta2, and phi2 must all be provided")
+
+    # Two squeezing options: provide only r0 (defaults r1=r2=r0) or provide all explicitly.
+    if r1 is None:
+        r1 = r0
+    if r2 is None:
+        r2 = r0
+
+    if r_in_dB:
+        r0 = r(r0)
+        if r1 is not None:
+            r1 = r(r1)
+        if r2 is not None:
+            r2 = r(r2)
+
+    input_state = [
+        SqueezedVacuum(0, r0, phi=np.pi),
+        SqueezedVacuum(1, r1, phi=np.pi),
+        SqueezedVacuum(2, r2, phi=0)
+    ]
+
+    BS1 = BSgate([1,2], theta1, phi1)
+    BS2 = BSgate([0,1], theta2, phi2)
+
+    interferometer = BS1 >> BS2
+
+    measurement = [
+        Number(0, Ns[0]).dual,
+        Number(1, Ns[1]).dual
+    ]
+    
+    c = Circuit(input_state) >> interferometer >> Circuit(measurement)
+
+    if cutoff is None:
+        out = c.contract()
+    else:
+        with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
+            out = c.contract()
+    probability = out.probability
+    #print(f'Probability: {out.probability}')
+
+    return out.normalize(), probability
+
+# Generalization to N modes (breaks down )
+def circuit_Nmode_GBS(
+    Ns,
+    squeezing_params=None,
+    bs_params=None,     # list of (theta, phi)
+    cutoff=None,
+    r_in_dB=False,
+    r0=None,
+):
+
+    if not isinstance(Ns, (list, tuple)):
+        raise ValueError("Ns must be a list/tuple of non-negative integers")
+    if not all(isinstance(n, (int, np.integer)) and n >= 0 for n in Ns):
+        raise ValueError("Ns entries must be non-negative integers")
+
+    if bs_params is None:
+        raise ValueError("bs_params must be provided")
+
+    if cutoff is not None and (not isinstance(cutoff, (int, np.integer)) or cutoff <= 0):
+        raise ValueError("cutoff must be a positive integer")
+
+    N = len(Ns) + 1
+
+    # Two squeezing options:
+    # 1) Provide only r0 -> all modes use r0
+    # 2) Provide all squeezing parameters explicitly in squeezing_params
+    if squeezing_params is None:
+        if r0 is None:
+            raise ValueError("Provide either r0 or squeezing_params")
+        squeezing_params = [r0] * N
+    elif np.isscalar(squeezing_params):
+        squeezing_params = [squeezing_params] * N
+    else:
+        if len(squeezing_params) != N:
+            raise ValueError(
+                f"squeezing_params must have length N={N} (got {len(squeezing_params)})"
+            )
+
+    if N < 2:
+        raise ValueError("Need at least 2 modes")
+    if not isinstance(bs_params, (list, tuple)) or len(bs_params) != N - 1:
+        raise ValueError(f"bs_params must be a list/tuple of length N-1 (expected {N - 1})")
+    if not all(isinstance(p, (list, tuple)) and len(p) == 2 for p in bs_params):
+        raise ValueError("Each bs_params entry must be a (theta, phi) pair")
+
+    if r_in_dB:
+        squeezing_params = [r(sq) for sq in squeezing_params]
+
+    
+    input_state = [
+        SqueezedVacuum(i, r, phi=(0 if i % 2 == 1 else np.pi/2))
+        for i, r in enumerate(squeezing_params)
+    ]
+
+    # Single chain of adjacent beam splitters: (0,1), (1,2), ..., (N-2,N-1).
+    bs_gates = []
+    for i in range(N - 1):
+        theta, phi = bs_params[i]
+        bs_gates.append(BSgate([i, i + 1], theta, phi))
+
+    interferometer = bs_gates[0]
+    for gate in bs_gates[1:]:
+        interferometer >>= gate
+
+    measurement = [
+        Number(i, n).dual for i, n in enumerate(Ns)
+    ]
+
+    c = Circuit(input_state) >> interferometer >> Circuit(measurement)
+    if cutoff is None:
+        out = c.contract()
+    else:
+        with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
+            out = c.contract()
+    probability = out.probability
+
+    return out.normalize(), probability
 
 ##################################################################################################
 # Side-by-side Wigner comparison plotting function
