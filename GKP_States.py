@@ -514,10 +514,10 @@ class GKPState:
         fit["candidate_xis"] = xis[candidate_idx]
 
         print(f"Best scaling s: {best_scale:.6f}")
-        print(f"Best xi:  {best_xi:.8e}")
+        print(f"Best xi:  {best_xi:.3f}")
         print("Candidate minima:")
         for rank, idx in enumerate(candidate_idx, 1):
-            print(f"  {rank:2d}) s={scales[idx]:.6f}, xi={xis[idx]:.8e}")
+            print(f"  {rank:2d}) s={scales[idx]:.6f}, xi={xis[idx]:.3f}")
 
         if plot_scan:
             fig, ax = plt.subplots(figsize=(7.2, 4.2), constrained_layout=True)
@@ -525,9 +525,9 @@ class GKPState:
             if len(local_idx) > 0:
                 ax.scatter(scales[local_idx], xis[local_idx], s=42, color="tab:orange", zorder=3, label="local minima")
             ax.scatter([best_scale], [best_xi], s=70, color="crimson", edgecolors="black", linewidths=0.4, zorder=4, label="selected minimum")
-            ax.set_xlabel("scaling s", fontsize=11)
+            ax.set_xlabel(r"scaling $s$", fontsize=11)
             ax.set_ylabel(r"$\tilde{\xi}(s)$" if normalized_xi else r"$\xi(s)$", fontsize=11)
-            ax.set_title("Scaling scan", fontsize=12)
+            ax.set_title(r"Scaling parameter scan", fontsize=12)
             ax.grid(alpha=0.28, linestyle="--", linewidth=0.6)
             ax.tick_params(labelsize=10)
             ax.legend(frameon=False, fontsize=9)
@@ -559,15 +559,27 @@ class GKPState:
                 fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.4), constrained_layout=True)
 
                 im0 = axes[0].imshow(W_input, extent=(x_range[0], x_range[1], p_range[0], p_range[1]), origin="lower", cmap="RdBu_r", vmin=vmin, vmax=vmax)
-                axes[0].set_title("Input Wigner")
-                axes[0].set_xlabel("x")
-                axes[0].set_ylabel("p")
+                
+                axes[0].set_title(r"Input Wigner $W_{\mathrm{in}}(x,p)$")
+                axes[0].set_xlabel(r"$x$")
+                axes[0].set_ylabel(r"$p$")
                 axes[0].set_aspect("equal")
 
                 im1 = axes[1].imshow(W_ref, extent=(x_range[0], x_range[1], p_range[0], p_range[1]), origin="lower", cmap="RdBu_r", vmin=vmin, vmax=vmax)
-                axes[1].set_title(f"GKP ref (s={s_val:.3f}, xi={xis[idx]:.3e})")
-                axes[1].set_xlabel("x")
-                axes[1].set_ylabel("p")
+                axes[1].set_title(r"Reference Wigner $W_{\mathrm{GKP}}(x,p)$")
+                # Put fit parameters inside the right panel to keep title baselines aligned.
+                axes[1].text(
+                    0.02,
+                    0.98,
+                    rf"$s={s_val:.3f},\;\xi={xis[idx]:.3f}$",
+                    transform=axes[1].transAxes,
+                    ha="left",
+                    va="top",
+                    fontsize=10,
+                    bbox={"boxstyle": "round,pad=0.2", "facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+                )
+                axes[1].set_xlabel(r"$x$")
+                axes[1].set_ylabel(r"$p$")
                 axes[1].set_aspect("equal")
 
                 cbar = fig.colorbar(im1, ax=axes, fraction=0.046, pad=0.04)
@@ -680,11 +692,11 @@ class GKPState:
             interpolation="none",
             aspect="equal",
         )
-        fig.colorbar(im, ax=ax, label="W(q,p)")
+        fig.colorbar(im, ax=ax, label=r"$W(x,p)$")
         ax.scatter(pts[:, 0], pts[:, 1], s=20, c="k", marker="o", label="Lattice points")
-        ax.set_xlabel("q")
-        ax.set_ylabel("p")
-        ax.set_title("Wigner + GKP lattice points")
+        ax.set_xlabel(r"$x$")
+        ax.set_ylabel(r"$p$")
+        ax.set_title(r"Wigner distribution with GKP lattice points")
         ax.legend(loc="upper right")
         fig.tight_layout()
 
@@ -931,11 +943,11 @@ class GKPState:
         )
 
         cbar = fig.colorbar(im, ax=ax)
-        cbar.set_label("Wigner function")
+        cbar.set_label("Wigner value")
 
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
-        ax.set_title("Finite-energy GKP Wigner function")
+        ax.set_title(r"Finite-energy GKP Wigner distribution $W_{\mathrm{GKP}}(x,p)$")
 
         plt.tight_layout()
         plt.show()

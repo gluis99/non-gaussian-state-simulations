@@ -353,7 +353,7 @@ def compare_Wigners(
     figsize=(11, 4.8),
     common_scale=True,
     shared_colorbar=True,
-    cbar_label=r"$W(q,p)$",
+    cbar_label=r"$W(x,p)$",
     savepath=None,
     dpi=400,
 ):
@@ -399,7 +399,7 @@ def compare_Wigners(
 
     for ax, title in zip(axes, [title1, title2]):
         ax.set_title(title)
-        ax.set_xlabel(r"$q$")
+        ax.set_xlabel(r"$x$")
         ax.set_ylabel(r"$p$")
         ax.set_aspect("equal")
         ax.tick_params(direction="in", top=True, right=True)
