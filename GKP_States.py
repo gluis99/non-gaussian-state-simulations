@@ -469,7 +469,6 @@ class GKPState:
             norm_disp=True,
         )
 
-
     def compare_scaled_grid(
         self,
         wigner_plot,

@@ -4,18 +4,25 @@ import matplotlib.colors as mcolors
 from scipy.signal import find_peaks
 
 from mrmustard import settings
-from mrmustard.lab import Circuit, SqueezedVacuum, Number
-from mrmustard.lab.transformations import BSgate
+from mrmustard.lab import SqueezedVacuum, Number, BSgate
 from mrmustard.physics.wigner import wigner_discretized
 
 r = lambda r_dB: r_dB / 20 * np.log(10)
 
 # Helper function to display Wigner functions in a GitHub-friendly way
-def show_state_wigner(state, title="State Wigner Function", q_min=-5, q_max=5, n_points=301):
+def show_state_wigner(
+    state,
+    title="State Wigner Function",
+    q_min=-5,
+    q_max=5,
+    n_points=301,
+    fock_cutoff=60,
+):
     """Render a static Wigner plot that is visible on GitHub."""
     q = np.linspace(q_min, q_max, n_points)
     p = np.linspace(q_min, q_max, n_points)
-    W, X, P = wigner_discretized(state.dm().ansatz.array, q, p)
+    rho = state.dm().fock_array(fock_cutoff)
+    W, X, P = wigner_discretized(rho, q, p)
     absmax = np.max(np.abs(W))
     if absmax == 0:
         absmax = 1e-12
@@ -58,20 +65,21 @@ def circuit_2cat(r0, r1 = None, n = 1, cutoff = None, r_in_dB = False):
     
     theta = np.arcsin(np.sqrt((1-np.exp(2*r1))/((np.exp(2*r0)-np.exp(2*r1)))))
 
-    input_state = [
-        SqueezedVacuum(0, r0, phi=0),
-        SqueezedVacuum(1, r1, phi=0)
-    ]
-
-    BS2 = BSgate([0,1], theta, phi=0)
-
-    c = Circuit(input_state) >> BS2 >> Number(0, n).dual
-
     if cutoff is None:
-        out = c.contract()
+        out = (
+            SqueezedVacuum(0, r0, phi=0)
+            >> SqueezedVacuum(1, r1, phi=0)
+            >> BSgate((0, 1), theta=theta, phi=0)
+            >> Number(0, n).dual
+        )
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = c.contract()
+            out = (
+                SqueezedVacuum(0, r0, phi=0)
+                >> SqueezedVacuum(1, r1, phi=0)
+                >> BSgate((0, 1), theta=theta, phi=0)
+                >> Number(0, n).dual
+            )
     probability = out.probability
 
     return out.normalize(), probability
@@ -117,31 +125,33 @@ def circuit_4cat(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=False)
     theta1 = theta(r0, r1, "BS1")
     theta2 = theta(r2, r3, "BS2")
 
-    input_state = [
-        SqueezedVacuum(0, r0, phi=0),
-        SqueezedVacuum(1, r1, phi=0),
-        SqueezedVacuum(2, r2, phi=0),
-        SqueezedVacuum(3, r3, phi=0),
-    ]
-
-    BS1 = BSgate([0, 1], theta1, phi=0)
-    BS2 = BSgate([2, 3], theta2, phi=0)
-    BS3 = BSgate([0, 2], np.pi / 4, phi=np.pi / 2)
-
-    interferometer = BS1 >> BS2 >> BS3
-
-    measurement = [
-        Number(1, Ns[0]).dual,
-        Number(2, n2).dual,
-        Number(3, Ns[1]).dual,
-    ]
-
-    c = Circuit(input_state) >> interferometer >> Circuit(measurement)
     if cutoff is None:
-        out = c.contract()
+        out = (
+            SqueezedVacuum(0, r0, phi=0)
+            >> SqueezedVacuum(1, r1, phi=0)
+            >> SqueezedVacuum(2, r2, phi=0)
+            >> SqueezedVacuum(3, r3, phi=0)
+            >> BSgate((0, 1), theta=theta1, phi=0)
+            >> BSgate((2, 3), theta=theta2, phi=0)
+            >> BSgate((0, 2), theta=np.pi / 4, phi=np.pi / 2)
+            >> Number(1, Ns[0]).dual
+            >> Number(2, n2).dual
+            >> Number(3, Ns[1]).dual
+        )
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = c.contract()
+            out = (
+                SqueezedVacuum(0, r0, phi=0)
+                >> SqueezedVacuum(1, r1, phi=0)
+                >> SqueezedVacuum(2, r2, phi=0)
+                >> SqueezedVacuum(3, r3, phi=0)
+                >> BSgate((0, 1), theta=theta1, phi=0)
+                >> BSgate((2, 3), theta=theta2, phi=0)
+                >> BSgate((0, 2), theta=np.pi / 4, phi=np.pi / 2)
+                >> Number(1, Ns[0]).dual
+                >> Number(2, n2).dual
+                >> Number(3, Ns[1]).dual
+            )
     out_norm = out.normalize()
 
     return out_norm, out.probability
@@ -187,35 +197,33 @@ def circuit_4cat_v2(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=Fal
     theta1 = theta(r0, r1, "BS1")
     theta2 = theta(r2, r3, "BS2")
 
-    cat1_circuit = Circuit([
-        SqueezedVacuum(0, r0, phi=0),
-        SqueezedVacuum(1, r1, phi=0),
-    ]) >> BSgate([0, 1], theta1, phi=0) >> Number(0, n1).dual
     if cutoff is None:
-        cat_1 = cat1_circuit.contract().normalize()
+        out = (
+            SqueezedVacuum(0, r0, phi=0)
+            >> SqueezedVacuum(1, r1, phi=0)
+            >> SqueezedVacuum(2, r2, phi=0)
+            >> SqueezedVacuum(3, r3, phi=0)
+            >> BSgate((0, 1), theta=theta1, phi=0)
+            >> Number(0, n1).dual
+            >> BSgate((2, 3), theta=theta2, phi=0)
+            >> Number(2, n3).dual
+            >> BSgate((1, 3), theta=np.pi / 4, phi=np.pi / 2)
+            >> Number(3, n2).dual
+        )
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            cat_1 = cat1_circuit.contract().normalize()
-
-    cat2_circuit = Circuit([
-        SqueezedVacuum(2, r2, phi=0),
-        SqueezedVacuum(3, r3, phi=0),
-    ]) >> BSgate([2, 3], theta2, phi=0) >> Number(2, n3).dual
-    if cutoff is None:
-        cat_2 = cat2_circuit.contract().normalize()
-    else:
-        with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            cat_2 = cat2_circuit.contract().normalize()
-
-    BS = BSgate([1, 3], np.pi / 4, phi=np.pi / 2)
-    measurement = [Number(3, n2).dual]
-
-    c = Circuit([cat_1, cat_2]) >> BS >> Circuit(measurement)
-    if cutoff is None:
-        out = c.contract()
-    else:
-        with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = c.contract()
+            out = (
+                SqueezedVacuum(0, r0, phi=0)
+                >> SqueezedVacuum(1, r1, phi=0)
+                >> SqueezedVacuum(2, r2, phi=0)
+                >> SqueezedVacuum(3, r3, phi=0)
+                >> BSgate((0, 1), theta=theta1, phi=0)
+                >> Number(0, n1).dual
+                >> BSgate((2, 3), theta=theta2, phi=0)
+                >> Number(2, n3).dual
+                >> BSgate((1, 3), theta=np.pi / 4, phi=np.pi / 2)
+                >> Number(3, n2).dual
+            )
     out_norm = out.normalize()
 
     return out_norm, out.probability
@@ -255,29 +263,27 @@ def circuit_3mode_GBS_original(
         if r2 is not None:
             r2 = r(r2)
 
-    input_state = [
-        SqueezedVacuum(0, r0, phi=0),
-        SqueezedVacuum(1, r1, phi=0),
-        SqueezedVacuum(2, -r2, phi=0)
-    ]
-
-    BS21 = BSgate([2,1], theta21, phi21)
-    BS10 = BSgate([1,0], theta10, phi10)
-
-    interferometer = BS21 >> BS10
-
-    measurement = [
-        Number(0, Ns[0]).dual,
-        Number(1, Ns[1]).dual
-    ]
-    
-    c = Circuit(input_state) >> interferometer >> Circuit(measurement)
-
     if cutoff is None:
-        out = c.contract()
+        out = (
+            SqueezedVacuum(0, r0, phi=0)
+            >> SqueezedVacuum(1, r1, phi=0)
+            >> SqueezedVacuum(2, -r2, phi=0)
+            >> BSgate((2, 1), theta=theta21, phi=phi21)
+            >> BSgate((1, 0), theta=theta10, phi=phi10)
+            >> Number(0, Ns[0]).dual
+            >> Number(1, Ns[1]).dual
+        )
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = c.contract()
+            out = (
+                SqueezedVacuum(0, r0, phi=0)
+                >> SqueezedVacuum(1, r1, phi=0)
+                >> SqueezedVacuum(2, -r2, phi=0)
+                >> BSgate((2, 1), theta=theta21, phi=phi21)
+                >> BSgate((1, 0), theta=theta10, phi=phi10)
+                >> Number(0, Ns[0]).dual
+                >> Number(1, Ns[1]).dual
+            )
     probability = out.probability
     #print(f'Probability: {out.probability}')
 
@@ -314,29 +320,27 @@ def circuit_3mode_GBS(
         if r2 is not None:
             r2 = r(r2)
 
-    input_state = [
-        SqueezedVacuum(0, r0, phi=np.pi),
-        SqueezedVacuum(1, r1, phi=np.pi),
-        SqueezedVacuum(2, r2, phi=0)
-    ]
-
-    BS1 = BSgate([0,1], theta0, phi0)
-    BS2 = BSgate([1,2], theta1, phi1)
-
-    interferometer = BS1 >> BS2
-
-    measurement = [
-        Number(0, Ns[0]).dual,
-        Number(1, Ns[1]).dual
-    ]
-    
-    c = Circuit(input_state) >> interferometer >> Circuit(measurement)
-
     if cutoff is None:
-        out = c.contract()
+        out = (
+            SqueezedVacuum(0, r0, phi=np.pi)
+            >> SqueezedVacuum(1, r1, phi=np.pi)
+            >> SqueezedVacuum(2, r2, phi=0)
+            >> BSgate((0, 1), theta=theta0, phi=phi0)
+            >> BSgate((1, 2), theta=theta1, phi=phi1)
+            >> Number(0, Ns[0]).dual
+            >> Number(1, Ns[1]).dual
+        )
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = c.contract()
+            out = (
+                SqueezedVacuum(0, r0, phi=np.pi)
+                >> SqueezedVacuum(1, r1, phi=np.pi)
+                >> SqueezedVacuum(2, r2, phi=0)
+                >> BSgate((0, 1), theta=theta0, phi=phi0)
+                >> BSgate((1, 2), theta=theta1, phi=phi1)
+                >> Number(0, Ns[0]).dual
+                >> Number(1, Ns[1]).dual
+            )
     probability = out.probability
 
     return out.normalize(), probability
@@ -437,7 +441,7 @@ def circuit_Nmode_GBS(
     bs_gates = []
     for i in range(N - 1):
         theta, phi = bs_by_index[i]
-        bs_gates.append(BSgate([i, i + 1], theta, phi))
+        bs_gates.append(BSgate((i, i + 1), theta=theta, phi=phi))
 
     interferometer = bs_gates[0]
     for gate in bs_gates[1:]:
@@ -447,12 +451,21 @@ def circuit_Nmode_GBS(
         Number(i, n_by_mode[i]).dual for i in range(N - 1)
     ]
 
-    c = Circuit(input_state) >> interferometer >> Circuit(measurement)
     if cutoff is None:
-        out = c.contract()
+        out = input_state[0]
+        for state in input_state[1:]:
+            out = out >> state
+        out = out >> interferometer
+        for proj in measurement:
+            out = out >> proj
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = c.contract()
+            out = input_state[0]
+            for state in input_state[1:]:
+                out = out >> state
+            out = out >> interferometer
+            for proj in measurement:
+                out = out >> proj
     probability = out.probability
 
     return out.normalize(), probability

@@ -2,11 +2,13 @@ name: non-gaussian-states
 
 dependencies:
   - python=3.11
-  - numpy
-  - matplotlib
+  - numpy>=2,<3
+  - scipy>=1.14,<2
+  - numba>=0.64,<1
+  - matplotlib>=3.10,<4
+  - networkx>=3.1,<4
   - jupyterlab
   - pip
   - pip:
-      - plotly
       - git+https://github.com/XanaduAI/MrMustard.git
-      - git+https://github.com/qpit/TN_Sampling.git
+      - plotly>=6,<7

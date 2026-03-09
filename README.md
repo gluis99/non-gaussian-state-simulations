@@ -20,6 +20,22 @@ jupyter lab
 
 Open `cat_state_gen.ipynb` and run all cells.
 
+## Environment Notes
+
+This repository now targets the latest **MrMustard** API.
+The simulation helpers in `circuits_mrmustard.py` have been migrated accordingly.
+
+Recommended workflow:
+
+```bash
+# create a Python 3.11 virtual environment
+python3.11 -m venv simulations
+source simulations/bin/activate
+
+# install project dependencies
+pip install -r requirements.txt
+```
+
 ## Optional: LaTeX rendering
 
 Some plots use LaTeX text rendering in matplotlib.
