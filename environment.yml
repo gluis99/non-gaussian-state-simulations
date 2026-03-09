@@ -1,0 +1,12 @@
+name: non-gaussian-states
+
+dependencies:
+  - python=3.11
+  - numpy
+  - matplotlib
+  - jupyterlab
+  - pip
+  - pip:
+      - plotly
+      - git+https://github.com/XanaduAI/MrMustard.git
+      - git+https://github.com/qpit/TN_Sampling.git
