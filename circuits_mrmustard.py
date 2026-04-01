@@ -1,10 +1,13 @@
 import numpy as np
+import math
+from scipy.special import factorial
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.signal import find_peaks
+import itertools
 
 from mrmustard import settings
-from mrmustard.lab import SqueezedVacuum, Number, BSgate
+from mrmustard.lab import Vacuum, SqueezedVacuum, Number, BSgate, Attenuator
 from mrmustard.physics.wigner import wigner_discretized
 
 r = lambda r_dB: r_dB / 20 * np.log(10)
@@ -29,7 +32,7 @@ def show_state_wigner(
     norm = mcolors.TwoSlopeNorm(vmin=-absmax, vcenter=0.0, vmax=absmax)
 
     fig, ax = plt.subplots(figsize=(6, 5))
-    c = ax.pcolormesh(X, P, W, shading="auto", cmap="RdBu_r", norm=norm)
+    c = ax.pcolormesh(X, P, W, shading="auto", cmap="RdBu", norm=norm)
     fig.colorbar(c, ax=ax, label="W(x,p)")
     ax.set_xlabel("x")
     ax.set_ylabel("p")
@@ -49,7 +52,7 @@ def show_state_wigner(
 # Two options are supported:
  # 1) Provide only r0 -> r1=-r0 is used
  # 2) Provide all two squeezing parameters explicitly
-def circuit_2cat(r0, r1 = None, n = 1, cutoff = None, r_in_dB = False):
+def circuit_2cat(r0, r1 = None, n = 1, cutoff = None, r_in_dB = False, eta_PD=1.0, eta_out=1.0, pPNRD=False, M=28, tol_pPNRD=1e-30):
 
     if r_in_dB:
         r0 = r(r0)
@@ -65,27 +68,34 @@ def circuit_2cat(r0, r1 = None, n = 1, cutoff = None, r_in_dB = False):
     
     theta = np.arcsin(np.sqrt((1-np.exp(2*r1))/((np.exp(2*r0)-np.exp(2*r1)))))
 
+    gaussian_state = (
+        SqueezedVacuum(0, r0, phi=0)
+        >> SqueezedVacuum(1, r1, phi=0)
+        >> BSgate((0, 1), theta=theta, phi=0)
+    )
+
+    if eta_PD < 1.0 or eta_out < 1.0:
+        gaussian_state = gaussian_state >> Attenuator(0, eta_PD) >> Attenuator(1, eta_out)
+
     if cutoff is None:
-        out = (
-            SqueezedVacuum(0, r0, phi=0)
-            >> SqueezedVacuum(1, r1, phi=0)
-            >> BSgate((0, 1), theta=theta, phi=0)
-            >> Number(0, n).dual
-        )
+        if pPNRD:
+            out, probability = pseudoPNRD(gaussian_state, Ns=n, modes=0, M=M, tol=tol_pPNRD)
+        else:
+            post_state = gaussian_state >> Number(0, n).dual
+            probability = post_state.probability
+            out = post_state.normalize()
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = (
-                SqueezedVacuum(0, r0, phi=0)
-                >> SqueezedVacuum(1, r1, phi=0)
-                >> BSgate((0, 1), theta=theta, phi=0)
-                >> Number(0, n).dual
-            )
-    probability = out.probability
+            if pPNRD:
+                out, probability = pseudoPNRD(gaussian_state, Ns=n, modes=0, M=M, tol=tol_pPNRD)
+            else:
+                post_state = gaussian_state >> Number(0, n).dual
+                probability = post_state.probability
+                out = post_state.normalize()
 
-    return out.normalize(), probability
+    return out, probability
 
-
-def circuit_4cat(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=False):
+def circuit_4cat_4modes(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=False):
     if not isinstance(Ns, (list, tuple)) or len(Ns) != 2:
         raise ValueError("Ns must be a list/tuple with exactly two elements: [n1, n3]")
     if not all(isinstance(n, (int, np.integer)) and n >= 0 for n in Ns):
@@ -156,77 +166,48 @@ def circuit_4cat(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=False)
 
     return out_norm, out.probability
 
-
-def circuit_4cat_v2(Ns, r0, r2, r1=None, r3=None, n2=0, cutoff=None, r_in_dB=False):
+def circuit_4cat_3modes(Ns, r_in, cutoff=None, r_in_dB=False, eta_PD=1.0, eta_out=1.0, pPNRD=False, M=28, tol_pPNRD=1e-30):
 
     if not isinstance(Ns, (list, tuple)) or len(Ns) != 2:
-        raise ValueError("Ns must be a list/tuple with exactly two elements: [n1, n3]")
-    if not all(isinstance(n, (int, np.integer)) and n >= 0 for n in Ns):
-        raise ValueError("Ns entries must be non-negative integers")
+        raise ValueError("Ns must be a list/tuple with exactly two elements: [n1, n2]")
     if cutoff is not None and (not isinstance(cutoff, (int, np.integer)) or cutoff <= 0):
         raise ValueError("cutoff must be a positive integer")
 
     if r_in_dB:
-        r0 = r(r0)
-        r2 = r(r2)
-        if r1 is not None:
-            r1 = r(r1)
-        if r3 is not None:
-            r3 = r(r3)
+        r_in = r(r_in)
+    
+    theta_r = np.arcsin(1/np.sqrt(1+np.exp(2*r_in)))
 
-    if r1 is None:
-        r1 = -r0
-    if r3 is None:
-        r3 = -r2
+    gaussian_state = (
+        Vacuum(0)
+        >> SqueezedVacuum(1, r_in)
+        >> SqueezedVacuum(2, -r_in)
+        >> BSgate((2, 1), theta=np.pi/4)
+        >> BSgate((0, 1), theta=2*theta_r)
+        >> BSgate((2, 1), theta=np.pi/4)
+    )
 
-    def theta(ra, rb, label):
-        denom = np.exp(2 * ra) - np.exp(2 * rb)
-        if np.isclose(denom, 0.0):
-            raise ValueError(f"Invalid parameters for {label}: denominator is zero")
-
-        ratio = (1 - np.exp(2 * rb)) / denom
-        if ratio < -1e-12 or ratio > 1 + 1e-12:
-            raise ValueError(
-                f"Invalid parameters for {label}: arcsin argument out of range (got {ratio})"
-            )
-        ratio = np.clip(ratio, 0.0, 1.0)
-        return np.arcsin(np.sqrt(ratio))
-
-    n1, n3 = Ns
-
-    theta1 = theta(r0, r1, "BS1")
-    theta2 = theta(r2, r3, "BS2")
-
+    if eta_PD < 1.0 or eta_out < 1.0:
+        gaussian_state = gaussian_state >> Attenuator(0, eta_PD) >> Attenuator(1, eta_PD) >> Attenuator(2, eta_out)
+    
     if cutoff is None:
-        out = (
-            SqueezedVacuum(0, r0, phi=0)
-            >> SqueezedVacuum(1, r1, phi=0)
-            >> SqueezedVacuum(2, r2, phi=0)
-            >> SqueezedVacuum(3, r3, phi=0)
-            >> BSgate((0, 1), theta=theta1, phi=0)
-            >> Number(0, n1).dual
-            >> BSgate((2, 3), theta=theta2, phi=0)
-            >> Number(2, n3).dual
-            >> BSgate((1, 3), theta=np.pi / 4, phi=np.pi / 2)
-            >> Number(3, n2).dual
-        )
+        if pPNRD:
+            out, probability = pseudoPNRD(gaussian_state, Ns=Ns, modes=[1, 2], M=M, tol=tol_pPNRD)
+        else:
+            post_state = gaussian_state >> Number(1, Ns[0]).dual >> Number(2, Ns[1]).dual
+            probability = post_state.probability
+            out = post_state.normalize()
+    
     else:
         with settings(DEFAULT_FOCK_SIZE=cutoff, AUTOSHAPE_MIN=cutoff, AUTOSHAPE_MAX=cutoff):
-            out = (
-                SqueezedVacuum(0, r0, phi=0)
-                >> SqueezedVacuum(1, r1, phi=0)
-                >> SqueezedVacuum(2, r2, phi=0)
-                >> SqueezedVacuum(3, r3, phi=0)
-                >> BSgate((0, 1), theta=theta1, phi=0)
-                >> Number(0, n1).dual
-                >> BSgate((2, 3), theta=theta2, phi=0)
-                >> Number(2, n3).dual
-                >> BSgate((1, 3), theta=np.pi / 4, phi=np.pi / 2)
-                >> Number(3, n2).dual
-            )
-    out_norm = out.normalize()
+            if pPNRD:
+                out, probability = pseudoPNRD(gaussian_state, Ns=Ns, modes=[1, 2], M=M, tol=tol_pPNRD)
+            else:
+                post_state = gaussian_state >> Number(1, Ns[0]).dual >> Number(2, Ns[1]).dual
+                probability = post_state.probability
+                out = post_state.normalize()
 
-    return out_norm, out.probability
+    return out, probability
 
 ##################################################################################################
 # Gaussian boson sampling like circuit for generating grid-like states
@@ -240,7 +221,7 @@ def circuit_3mode_GBS_original(
     theta10=np.pi/6, phi10=0,
     cutoff=None,
     r_in_dB=False,
-):
+    ):
 
     if not isinstance(Ns, (list, tuple)) or len(Ns) != 2:
         raise ValueError("Ns must be a list/tuple with exactly two elements: [n0, n1]")
@@ -477,7 +458,7 @@ def compare_Wigners(
     Wigner_2,
     title1="State 1",
     title2="State 2",
-    cmap="RdBu_r",
+    cmap="RdBu",
     percentile=99.5,
     figsize=(11, 4.8),
     common_scale=True,
@@ -726,4 +707,225 @@ def plot_wigner_orthogonal_cuts(
         "diagnostics": diagnostics,
     }
 
+##################################################################################################
+# Implementing pseudo-PNR detection
+
+# Compute Stirling numbers of the second kind S(k, n) for 0 <= k <= max_k, 0 <= n <= max_n
+def stirling2(max_k: int, max_n: int) -> np.ndarray:
+    """
+    Precompute Stirling numbers of the second kind S(k, n)
+    for 0 <= k <= max_k, 0 <= n <= max_n.
+    Recurrence: S(k, n) = n * S(k-1, n) + S(k-1, n-1)
+    """
+    S = np.zeros((max_k + 1, max_n + 1), dtype=np.int64)
+    S[0, 0] = 1
+    for k in range(1, max_k + 1):
+        for n in range(1, min(k, max_n) + 1):
+            S[k, n] = n * S[k - 1, n] + S[k - 1, n - 1]
+    return S
+
+# Compute probability matrix P[n, k]: probability of measuring n clicks
+# given k incident photons with M on/off detectors.
+def prob_pseudoPNRD(M: int, k_max: int, n_max: int) -> np.ndarray:
+    """
+    Return matrix P[n, k]: probability of measuring n clicks
+    given k incident photons with M on/off detectors.
+
+    """
+    if n_max > M:
+        raise ValueError(f"n_max={n_max} cannot exceed M={M} bins")
+
+    # Precompute full Stirling table once
+    S = stirling2(k_max, n_max)
+
+    probabilities = np.zeros((n_max + 1, k_max + 1))
+
+    for k in range(k_max + 1):
+        for n in range(min(k, n_max) + 1):          # n <= k only; rest stay zero
+            if n > M:
+                continue                # can't have more clicks than bins
+            
+            prefix = math.factorial(M) // math.factorial(M - n)  # M!/(M-n)!
+
+            if n == k:
+                probabilities[n, k] = prefix / (M ** n)
+            else:                       # k > n
+                probabilities[n, k] = prefix / (M ** k) * S[k, n]
+
+    return probabilities
+ 
+def pseudoPNRD(state, Ns, modes, M, cutoff=None, tol=1e-30):
+    '''
+    Get the state after a pseudo-PNRD measurement on one or more modes with M bins and Ns clicks.
+    
+    Args:
+        state:  input quantum state
+        Ns:     int or list of ints — number of photons to consider per mode
+        modes:  int or list of ints — mode index/indices to measure
+        M:      int  — number of bins in the pseudo-PNRD
+        cutoff: int or None — max photon number to consider per mode
+        tol:    float — weight threshold for early termination
+    '''
+    # --- Normalise modes/M/n to lists of equal length ---
+    if isinstance(modes, (int, np.integer)):
+        modes = [int(modes)]
+    else:
+        modes = [int(m) for m in modes]
+
+    num_modes = len(modes)
+
+    M = int(M)
+
+    if isinstance(Ns, (int, np.integer)):
+        Ns = [int(ni) for ni in [Ns] * num_modes]
+    else:
+        Ns = [int(ni) for ni in Ns]
+
+    if len(Ns) != num_modes:
+        raise ValueError("modes, M, and Ns must all have the same length")
+
+    for i, ni in enumerate(Ns):
+        if ni < 0 or ni > M:
+            raise ValueError(f"n[{i}] must satisfy 0 <= n <= M, got n={ni}, M={M}")
+
+    if cutoff is None:
+        cutoff = int(settings.DEFAULT_FOCK_SIZE)
+    if cutoff < max(Ns):
+        raise ValueError(f"cutoff must be >= max(Ns), got cutoff={cutoff}, max(Ns)={max(Ns)}")
+
+    # --- Per-mode PNRD probability vectors P_i(n_i | k_i) ---
+    # Pn_list[i] is a 1-D array of length cutoff+1
+    Pn_list = [
+        prob_pseudoPNRD(M, cutoff, n_max=ni)[ni, :]
+        for ni in Ns
+    ]
+
+    # --- Iterate over all joint photon-number tuples (k0, k1, ...) ---
+    ranges = [range(ni, cutoff + 1) for ni in Ns]
+
+    post_states = []
+    post_weights = []
+
+    for ks in itertools.product(*ranges):
+        # Joint probability weight P(n0|k0) * P(n1|k1) * ...
+        joint_Pnk = float(np.prod([Pn_list[i][k] for i, k in enumerate(ks)]))
+        if joint_Pnk <= 0:
+            continue
+
+        # Project each mode onto its Fock number
+        state_k = state
+        for mode, k in zip(modes, ks):
+            state_k = state_k >> Number(mode, k).dual
+
+        prob_k = float(state_k.probability)
+        weight_k = prob_k * joint_Pnk
+
+        if weight_k < tol:
+            continue
+
+        post_states.append(state_k.normalize())
+        post_weights.append(weight_k)
+
+    if not post_weights:
+        raise ValueError(
+            "pseudoPNRD event has zero probability for the provided parameters/state"
+        )
+
+    total_prob = float(np.sum(post_weights))
+
+    state_out = post_states[0] * post_weights[0]
+    for s, w in zip(post_states[1:], post_weights[1:]):
+        state_out = state_out + s * w
+
+    return state_out.normalize(), total_prob
+
+def pseudoPNRD_one(state, n, j, M, cutoff=None, tol=1e-30):
+    '''
+    Get the state after a pseudo-PNRD measurement on mode j with M bins, n clicks
+    where we cut off the input state photons.
+    '''
+    if not isinstance(M, (int, np.integer)) or M <= 0:
+        raise ValueError("M must be a positive integer")
+    if not isinstance(n, (int, np.integer)) or n < 0 or n > M:
+        raise ValueError("n must be an integer with 0 <= n <= M")
+
+    if cutoff is None:
+        cutoff = int(settings.DEFAULT_FOCK_SIZE)
+    if not isinstance(cutoff, (int, np.integer)) or cutoff < n:
+        raise ValueError("cutoff must be an integer >= n")
+
+    # P(n clicks | k photons) for k=0..cutoff.
+    Pn = prob_pseudoPNRD(M, cutoff, n_max=n)[n, :]
+
+    post_states = []
+    post_weights = []
+    consecutive_small = 0
+
+    # n clicks can come from any k >= n (including the k=n diagonal term).
+    for k in range(n, cutoff + 1):
+        Pnk = Pn[k]
+        if Pnk <= 0:
+            consecutive_small += 1
+            if consecutive_small >= 5:
+                break
+            continue
+
+        state_k = state >> Number(j, k).dual
+        prob_k = float(state_k.probability)
+        weight_k = prob_k * Pnk
+
+        if weight_k < tol:
+            consecutive_small += 1
+            if consecutive_small >= 5:
+                break
+            continue
+
+        consecutive_small = 0
+        post_states.append(state_k.normalize())
+        post_weights.append(weight_k)
+
+    if not post_weights:
+        raise ValueError(
+            "pseudoPNRD event has zero probability for the provided parameters/state"
+        )
+
+    total_prob = float(np.sum(post_weights))
+
+    state_out = post_states[0] * post_weights[0] # Term corresponding to n=k
+    for s, w in zip(post_states[1:], post_weights[1:]):
+        state_out = state_out + s * w
+
+    return state_out.normalize(), total_prob
+
+def pPNRD_diag(M,n):
+    if n > M:
+        return 0
+    return math.factorial(M) // math.factorial(M - n) /M**(n)
+
+def show_pPNRD_diag(M, n_max):
+    n = np.arange(0, n_max + 1)
+    P_M = np.array([pPNRD_diag(M, ni) for ni in n])
+    
+    plt.figure(figsize=(6, 4))
+    plt.bar(n, P_M, color='skyblue', edgecolor='black')
+    plt.title(f'Probability of correctly identifying n photons with M={M}')
+    plt.xlabel('Photons n')
+    plt.ylabel('Probability P(n|n)')
+    plt.xticks(n)
+    plt.grid()
+    plt.show()
+
+def show_pPNRD_probabilities(M, k_max, n_max):
+
+    P = prob_pseudoPNRD(M, k_max, n_max)
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(P, origin='lower', aspect='auto', cmap='viridis')
+    plt.colorbar(im, label='Probability P(n | k)')
+    plt.xlabel('Incident photons k')
+    plt.ylabel('Measured clicks n')
+    plt.title(f'Pseudo PNRD Probability Matrix (M={M})')
+    plt.xticks(np.arange(k_max + 1))
+    plt.yticks(np.arange(n_max + 1))
+    plt.tight_layout()
+    plt.show()
 
